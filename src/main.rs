@@ -41,8 +41,8 @@ fn main() -> std::io::Result<()> {
         None => None,
     };
 
-    let node = Node::new(local_address, remote_address);
-    node.run()?;
+    let node = Node::new(local_address);
+    node.run(remote_address)?;
 
     Ok(())
 }

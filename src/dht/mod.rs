@@ -5,15 +5,25 @@ use std::net::UdpSocket;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
+use uuid::Uuid;
 
+/// Struct representing the local node
 pub struct Node {
-    local_address: String,
-    remote_address: Option<String>,
+    address: String,
     socket: Arc<UdpSocket>,
+    id: Uuid,
+    left_neighbour: Option<Neighbour>,
+    right_neighbour: Option<Neighbour>,
+}
+
+/// Struct storing neighbour node's informations
+pub struct Neighbour {
+    address: String,
+    id: Uuid,
 }
 
 impl Node {
-    pub fn new(local_address: String, remote_address: Option<String>) -> Self {
+    pub fn new(local_address: String) -> Self {
         // Local socket of the node
         let socket = Arc::new(match UdpSocket::bind(&local_address) {
             Ok(s) => s,
@@ -21,13 +31,15 @@ impl Node {
         });
 
         Node {
-            local_address,
-            remote_address,
+            address: local_address,
             socket,
+            id: Uuid::new_v4(),
+            left_neighbour: None,
+            right_neighbour: None,
         }
     }
 
-    pub fn run(&self) -> std::io::Result<()> {
+    pub fn run(&self, remote_address: Option<String>) -> std::io::Result<()> {
         // Cloning to pass the Atomic Reference Counted to the thread
         let socket_ref = self.socket.clone();
 
@@ -42,11 +54,9 @@ impl Node {
         // Cloning to pass the Atomic Reference Counted to the thread
         let socket_ref = self.socket.clone();
 
-        let remote_address_copy = self.remote_address.clone();
-
         // Launching the thread that consumme and treat messages
         let handle_consummer = thread::spawn(move || {
-            req_handler::run(socket_ref, remote_address_copy, rx).unwrap();
+            req_handler::run(socket_ref, remote_address, rx).unwrap();
         });
 
         handle_listener.join().unwrap();
