@@ -20,10 +20,6 @@ struct Args {
     #[arg(long)]
     bind_port: String,
 
-    /// Flag to specify if the node don't need to connect to another node
-    #[arg(short, long)]
-    dont_connect: bool,
-
     /// IP Address of remote node
     #[arg(long)]
     remote_ip: Option<String>,
@@ -39,8 +35,7 @@ fn main() -> std::io::Result<()> {
 
     // Building local address
     let mut local_address = args.bind_ip.clone();
-    local_address.push_str(":");
-    local_address.push_str(&args.bind_port);
+    local_address.push_str(&format!(":{}", args.bind_port));
 
     // Local socket of the node
     let socket = Arc::new(UdpSocket::bind(local_address)?);
@@ -56,15 +51,16 @@ fn main() -> std::io::Result<()> {
         receiver::listen_request(socket_ref, tx).unwrap();
     });
 
-    let remote_address = match args.remote_ip {
-        Some(mut ip) => {
-            ip.push_str(":");
-            ip.push_str(&args.remote_port.unwrap());
+    // Create remote address if both ip and port were provided, otherwise set to None
+    let remote_address = match args.remote_ip.zip(args.remote_port) {
+        Some((mut ip, port)) => {
+            ip.push_str(&format!(":{port}"));
             Some(ip)
-        }
+        },
         None => None,
     };
-    
+   
+    // Cloning to pass the Atomic Reference Counted to the thread
     let socket_ref = socket.clone();
 
     // Launching the thread that consumme and treat messages
