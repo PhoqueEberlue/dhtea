@@ -3,6 +3,7 @@ mod req_listener;
 
 use std::net::UdpSocket;
 use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::thread;
 use uuid::Uuid;
@@ -51,17 +52,33 @@ impl Node {
             req_listener::run(socket_ref, tx).unwrap();
         });
 
-        // Cloning to pass the Atomic Reference Counted to the thread
-        let socket_ref = self.socket.clone();
-
-        // Launching the thread that consumme and treat messages
-        let handle_consummer = thread::spawn(move || {
-            req_handler::run(socket_ref, remote_address, rx).unwrap();
-        });
+        self.run_req_handler(remote_address, rx).unwrap();
 
         handle_listener.join().unwrap();
-        handle_consummer.join().unwrap();
 
         Ok(())
+    }
+
+    // Main function of the request handler
+    fn run_req_handler(
+        &self,
+        remote_address: Option<String>,
+        channel_consummer: Receiver<String>,
+    ) -> std::io::Result<()> {
+        // If remote_address is not None, unwraps into address
+        if let Some(address) = remote_address {
+            let msg = "Whats up";
+            self.socket.connect(address)?;
+            self.socket.send(msg.as_bytes())?;
+        }
+
+        loop {
+            Node::handle_request(&channel_consummer);
+        }
+    }
+
+    fn handle_request(channel_consummer: &Receiver<String>) {
+        let msg = channel_consummer.recv().unwrap();
+        println!("{:?}", msg);
     }
 }
