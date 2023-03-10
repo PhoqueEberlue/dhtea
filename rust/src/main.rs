@@ -19,7 +19,7 @@ struct Args {
     #[arg(long)]
     remote_ip: Option<String>,
 
-    /// Port of the remote node
+    /// Port of remote node
     #[arg(long)]
     remote_port: Option<String>,
 }

@@ -1,4 +1,3 @@
-mod req_handler;
 mod req_listener;
 
 use std::net::UdpSocket;
@@ -19,10 +18,10 @@ pub struct Node {
 
 /// Struct storing neighbour node's informations
 pub struct Neighbour {
-    address: String,
-    id: Uuid,
+    address: String //ok but more perf if port and addr dissociated
 }
 
+/// represents a node (ie a machine) in the dht
 impl Node {
     pub fn new(local_address: String) -> Self {
         // Local socket of the node
@@ -40,6 +39,7 @@ impl Node {
         }
     }
 
+    /// runs a node indefenitely
     pub fn run(&self, remote_address: Option<String>) -> std::io::Result<()> {
         // Cloning to pass the Atomic Reference Counted to the thread
         let socket_ref = self.socket.clone();
@@ -68,8 +68,9 @@ impl Node {
         // If remote_address is not None, unwraps into address
         if let Some(address) = remote_address {
             let msg = "Whats up";
-            self.socket.connect(address)?;
+            self.socket.connect(address.clone())?;
             self.socket.send(msg.as_bytes())?;
+            println!("Sending {:?} to {:?}", msg, address);
         }
 
         loop {
@@ -78,7 +79,11 @@ impl Node {
     }
 
     fn handle_request(channel_consummer: &Receiver<String>) {
-        let msg = channel_consummer.recv().unwrap();
-        println!("{:?}", msg);
+        let rcv = channel_consummer.recv().unwrap();//i like naming var ;)
+        let mut rcv = rcv.split(";");//split at end of source; there is no ; in an address, we good
+        let src = rcv.next().unwrap().replacen("SRC:", "", 1);//shadowing go brrrrrr
+        let msg = rcv.next().unwrap().replacen("MSG:", "", 1);//replace only the first occurence
+
+        println!("recieved {:?} from {:?}", msg, src);
     }
 }
