@@ -29,19 +29,17 @@ fn main() -> std::io::Result<()> {
     let args = Args::parse();
 
     // Building local address
-    let mut local_address = args.bind_ip.clone();
-    local_address.push_str(&format!(":{}", args.bind_port));
+    let addr: dht::Addr = dht::Addr{ ip: args.bind_ip.clone(), port: args.bind_port.parse().unwrap() };
 
     // Create remote address if both ip and port were provided, otherwise set to None
     let remote_address = match args.remote_ip.zip(args.remote_port) {
         Some((mut ip, port)) => {
-            ip.push_str(&format!(":{port}"));
-            Some(ip)
+            Some(dht::Addr{ip, port:port.parse().unwrap()})
         }
         None => None,
     };
 
-    let node = Node::new(local_address);
+    let mut node = Node::new(addr);
     node.run(remote_address)?;
 
     Ok(())
