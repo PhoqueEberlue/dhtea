@@ -33,7 +33,7 @@ fn main() -> std::io::Result<()> {
 
     // Create remote address if both ip and port were provided, otherwise set to None
     let remote_address = match args.remote_ip.zip(args.remote_port) {
-        Some((mut ip, port)) => {
+        Some((ip, port)) => {
             Some(dht::Addr{ip, port:port.parse().unwrap()})
         }
         None => None,
