@@ -1,12 +1,15 @@
 mod req_listener;
 
+use ctrlc;
 use std::net::UdpSocket;
 use std::sync::mpsc;
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{ Receiver };
+use crossbeam_channel::{ bounded, Receiver as Crossbeam_Receiver, TryRecvError };
 use std::sync::Arc;
 use std::thread;
 use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Hash, Clone)]
 pub struct Addr {
@@ -58,20 +61,29 @@ impl Node {
         }
     }
 
-    /// runs a node indefenitely
+    /// runs a node until ctrl c
     pub fn run(&mut self, remote_address: Option<Addr>) -> std::io::Result<()> {
         // Cloning to pass the Atomic Reference Counted to the thread
         let socket_ref = self.socket.clone();
 
         // Creating a Multi Producer Single Consummer channel
         let (tx, rx) = mpsc::channel();
+        let (shutdown_tx, shutdown_rx) = bounded(0); //shutdown channels
+
+        ctrlc::set_handler(move || {//exit on ctlc 
+            println!("received Ctrl+C!");
+            shutdown_tx.send(()).unwrap();
+
+        }).expect("error in ctrlc");
 
         // Launching the thread that listens to the others nodes
+        let mv_shutdown_rx = shutdown_rx.clone();
+
         let handle_listener = thread::spawn(move || {
-            req_listener::run(socket_ref, tx).unwrap();
+            req_listener::run(socket_ref, tx, mv_shutdown_rx).unwrap();
         });
 
-        self.run_req_handler(remote_address, rx).unwrap();
+        self.run_req_handler(remote_address, rx, shutdown_rx).unwrap();
 
         handle_listener.join().unwrap();
 
@@ -83,6 +95,7 @@ impl Node {
         &mut self,
         remote_address: Option<Addr>,
         channel_consummer: Receiver<String>,
+        shutdown_rx: Crossbeam_Receiver<()>,
     ) -> std::io::Result<()> {
         // If remote_address is not None, unwraps into address
         if let Some(address) = remote_address {
@@ -93,11 +106,20 @@ impl Node {
 
         loop {
             self.handle_request(&channel_consummer);
+            match shutdown_rx.try_recv() {
+                Ok(()) | Err(TryRecvError::Disconnected) => {
+                    println!("stoping run req handler");
+                    break;
+                },
+                Err(TryRecvError::Empty) => {}
+            }
         }
+        self.send_leave();
+        Ok(())
     }
 
     fn handle_request(&mut self, channel_consummer: &Receiver<String>) {
-        let rcv = channel_consummer.recv().unwrap();//i like naming var ;)
+        let rcv = channel_consummer.recv().unwrap();//blocking : ctrl c stops here for now TODO
         let mut rcv = rcv.split(";");//split at end of source; there is no ; in an address, we good
         let src = rcv.next().unwrap().replacen("SRC:", "", 1);//shadowing go brrrrrr
         let msg = rcv.next().unwrap().replacen("MSG:", "", 1);//replace only the first occurence
@@ -131,7 +153,7 @@ impl Node {
             },
             "INIT CONNECT" => {
                 print!("[INIT CONNECT]");
-                self.join_other(addr);
+                self.join(addr);
             },
             "REQINS" => {
                 let direction = msg.next().unwrap();
@@ -143,8 +165,8 @@ impl Node {
                 println!("[REQINS] from {} joining {} hash {}", addr.to_string(), addr_joining.to_string(), hash);
                 
                 match direction {
-                    "RGT" => { self.join_other_right(addr_joining, hash) },
-                    "LFT" => { self.join_other_left(addr_joining, hash) },
+                    "RGT" => { self.join_right(addr_joining, hash) },
+                    "LFT" => { self.join_left(addr_joining, hash) },
                     _ => panic!("didnt understand direction in join. expected rgt or lft got {:?}", direction)
                 }
             },
@@ -165,13 +187,13 @@ impl Node {
     }
 
     /// first join request, everything else is called from here
-    fn join_other(&mut self, entry: Addr) {
+    fn join(&mut self, entry: Addr) {
         let hash = calculate_hash(&entry);
 
         if hash > self.hash {
-            self.join_other_right(entry, hash);
+            self.join_right(entry, hash);
         } else if hash < self.hash {
-            self.join_other_left(entry, hash);//TODO join left
+            self.join_left(entry, hash);//TODO join left
         } else {
             panic!("Tried to join self");
         }
@@ -180,7 +202,7 @@ impl Node {
     /// check and insert if node should be inserted right (if hash is bigger than right then go
     /// right)
     /// if not, sends it to right node to check for the same thing
-    fn join_other_right(&mut self, to_join: Addr, hash: u64) {
+    fn join_right(&mut self, to_join: Addr, hash: u64) {
         if hash == self.hash {
             panic!("attempting to join to self");
         }
@@ -207,7 +229,7 @@ impl Node {
     /// check and insert if node should be inserted left (if hash is bigger than self then go
     /// right)
     /// if not, sends it to right node to check for the same thing
-    fn join_other_left(&mut self, to_join: Addr, hash: u64) {
+    fn join_left(&mut self, to_join: Addr, hash: u64) {
         if hash == self.hash {
             panic!("attempting to join to self");
         }
@@ -355,6 +377,24 @@ impl Node {
         // TODO RECHECK PLEASE
         let msg = format!("JOIN:{}:{}", "RGT", self.address.to_string());
         self.socket.send_to(msg.as_bytes(), to_join.to_string()).unwrap();
+    }
+
+    /// leaves the dht
+    fn send_leave(&self) {
+        if self.left_neighbour.is_some() && self.right_neighbour.is_some() {
+            let lft_addr = self.left_neighbour.clone().unwrap().address.to_string();
+            let rgt_addr = self.right_neighbour.clone().unwrap().address.to_string();
+
+            println!("[LEAVING] sending neighbour info to {} and {}", lft_addr, rgt_addr);
+
+            //abusing join instead of doing a proper leave wont hurt
+            //the progression in the future Clueless
+            let lft_msg = format!("JOIN:{}:{}", "LFT", rgt_addr);
+            let rgt_msg = format!("JOIN:{}:{}", "RGT", lft_addr);
+
+            self.socket.send_to(lft_msg.as_bytes(), lft_addr.to_string()).unwrap();
+            self.socket.send_to(rgt_msg.as_bytes(), rgt_addr.to_string()).unwrap();
+        }
     }
 
     /// check if this is the last node of dht (as in if the circle werent closed, would that one 
