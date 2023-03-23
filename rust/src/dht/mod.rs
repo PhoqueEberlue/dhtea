@@ -88,20 +88,12 @@ impl Node {
         if let Some(address) = remote_address {
             let msg = "INIT CONNECT";
             self.socket.send_to(msg.as_bytes(), address.to_string())?;
-            println!("Sending {:?} to {:?}:{:?}", msg, address.ip, address.port);
+            println!("Sending {:?} to {:?}", msg, address.to_string());
         }
 
         loop {
             self.handle_request(&channel_consummer);
         }
-    }
-    /// DO NOT USE THAT we dont want to block to single addr
-    fn connect(&self, addr: Addr) {
-        let mut dest: String = addr.ip;
-        dest.push_str(":");
-        dest.push_str(addr.port.to_string().as_str());
-
-        self.socket.connect(dest).unwrap();
     }
 
     fn handle_request(&mut self, channel_consummer: &Receiver<String>) {
@@ -145,11 +137,14 @@ impl Node {
                 let direction = msg.next().unwrap();
                 let ip = msg.next().unwrap();
                 let port = msg.next().unwrap();
-                let addr = Addr{ip: String::from(ip), port: port.parse().unwrap()};
+                let addr_joining = Addr{ip: String::from(ip), port: port.parse().unwrap()}; //SHADOWING !!!
+
+                let hash = calculate_hash(&addr_joining);
+                println!("[REQINS] from {} joining {} hash {}", addr.to_string(), addr_joining.to_string(), hash);
                 
                 match direction {
-                    "RGT" => { self.join_other_right(addr.clone(), hash) },
-                    "LFT" => { self.join_other_left(addr.clone(), hash) },
+                    "RGT" => { self.join_other_right(addr_joining, hash) },
+                    "LFT" => { self.join_other_left(addr_joining, hash) },
                     _ => panic!("didnt understand direction in join. expected rgt or lft got {:?}", direction)
                 }
             },
@@ -190,12 +185,15 @@ impl Node {
             panic!("attempting to join to self");
         }
 
-        match &self.right_neighbour {
+        match &mut self.right_neighbour.clone() {
             Some(right_neighbour) => {
-            if hash < right_neighbour.hash { //if node belongs here
+                if hash < right_neighbour.hash { //if node belongs here
                     self.insert_right(to_join, hash, false);
                 } else if hash > right_neighbour.hash {
-                    self.request_join_right(to_join);
+                    self.reqins_right(to_join.clone());
+                    if self.is_last_node() {
+                        self.insert_right(to_join, hash, false);
+                    }
                 } else {
                     println!("[JOIN OTHER RIGHT] attempt to join same node, we good, stopping there");
                 }
@@ -214,12 +212,18 @@ impl Node {
             panic!("attempting to join to self");
         }
 
-        match &self.left_neighbour {
+        match &mut self.left_neighbour.clone() {
             Some(left_neighbour) => {
+
                 if hash > left_neighbour.hash { //if node belongs here
                     self.insert_left(to_join, hash, false);
                 } else if hash < left_neighbour.hash {
-                    self.request_join_left(to_join);
+                    self.reqins_left(to_join.clone()); // if not sends to left
+                    if self.is_last_node() {
+                        self.insert_left(to_join, hash, false);//INSERT ONLY AFTER REQINS
+                                                               //if reqins uneeded, node will check
+                                                               //and stop
+                    }
                 } else { 
                     println!("[JOIN OTHER LEFT] attempt to join same node, we good, stopping there");
                 }
@@ -232,6 +236,7 @@ impl Node {
 
     // insert a nodes on the left, and sends request to left node
     fn insert_left(&mut self, addr: Addr, hash: u64, join: bool) {
+
         match &mut self.left_neighbour {
             Some(neighbour) => {
                 neighbour.hash = hash;
@@ -243,15 +248,22 @@ impl Node {
             },
             None => {
                 self.left_neighbour = Some(Neighbour{ hash, address: addr.clone() });
+
+                if self.is_last_node() {
+                    self.right_neighbour = Some(Neighbour{ hash, address: addr.clone() });
+
+                    println!("[INSERT] {} is right of {}",
+                            self.left_neighbour.clone().unwrap().address.to_string(), self.address.to_string());
+                }
                 if !join {
                     self.send_join_left(addr.clone());
                 }
             }
         }
 
-        let src = self.address.clone();
+        let src = self.left_neighbour.clone().unwrap().address;
         println!("[INSERT] {} is left of {}",
-                 src.to_string(), addr.to_string());
+                 src.to_string(), self.address.to_string());
     }
 
     fn insert_right(&mut self, addr: Addr, hash: u64, join: bool) {
@@ -261,11 +273,20 @@ impl Node {
                 neighbour.address = addr.clone();
 
                 if !join {
-                    self.request_join_right(addr.clone()); //send req to other right
+                    self.send_join_right(addr.clone()); //send req to other right
                 }
             },
             None => {
                 self.right_neighbour = Some(Neighbour{ hash, address: addr.clone() });
+
+                if self.left_neighbour.is_none() {
+                    self.left_neighbour = Some(Neighbour{ hash, address: addr.clone() });
+
+                    println!("[INSERT] {} is left of {}",
+                             self.left_neighbour.clone().unwrap().address.to_string(),
+                             self.address.to_string());
+                }
+
                 if !join {
                     self.send_join_right(addr.clone());
                 }
@@ -274,14 +295,18 @@ impl Node {
 
         let src = self.right_neighbour.clone().unwrap().address;
         println!("[INSERT] {} is right of {}",
-                 src.to_string(), addr.to_string());
+                 src.to_string(), self.address.to_string());
     }
 
-    fn request_join_right(&self, addr: Addr) -> Option<()> {
+    /// send a request to left node to insert it to its right
+    /// this way is safer (nodes have to be reviewed by peer)
+    /// other way would be to return address to other and tell 
+    /// the requesing node to go insert itself
+    fn reqins_right(&self, addr: Addr) -> Option<()> {
         let dest = self.right_neighbour.clone()?.address;
         let msg = format!("REQINS:RGT:{}", addr.to_string());
         self.socket.send_to(msg.as_bytes(), dest.to_string()).unwrap();
-        println!("Sending {:?} to {:?}:{:?}", msg, addr.ip, addr.port);
+        println!("Sending {:?} to {:?}", msg, dest.to_string());
         Some(())
     }
 
@@ -289,11 +314,11 @@ impl Node {
     /// this way is safer (nodes have to be reviewed by peer)
     /// other way would be to return address to other and tell 
     /// the requesing node to go insert itself
-    fn request_join_left(&self, addr: Addr) -> Option<()> {
+    fn reqins_left(&self, addr: Addr) -> Option<()> {
         let dest = self.left_neighbour.clone()?.address;
         let msg = format!("REQINS:LFT:{}", addr.to_string());
         self.socket.send_to(msg.as_bytes(), dest.to_string()).unwrap();
-        println!("Sending {:?} to {:?}:{:?}", msg, addr.ip, addr.port);
+        println!("Sending {:?} to {:?}", msg, dest.to_string());
         Some(())
     }
 
@@ -330,6 +355,20 @@ impl Node {
         // TODO RECHECK PLEASE
         let msg = format!("JOIN:{}:{}", "RGT", self.address.to_string());
         self.socket.send_to(msg.as_bytes(), to_join.to_string()).unwrap();
+    }
+
+    /// check if this is the last node of dht (as in if the circle werent closed, would that one 
+    /// be an extrimity)
+    fn is_last_node(&self) -> bool {
+        let mut res:bool = false;
+        if self.left_neighbour.is_none() || self.right_neighbour.is_none() {
+            res = true;
+        } else if self.right_neighbour.clone().unwrap().hash < self.hash
+            || self .left_neighbour.clone().unwrap().hash > self.hash {
+            res = true;
+        }
+        println!("Last node of ring");
+        res
     }
 }
 
