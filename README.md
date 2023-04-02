@@ -83,3 +83,4 @@ python src/main.py
 ```
 
 ## Rust
+Please read the readme inside `./rust` ([Here's a shortcut](./rust/README.md)) 
