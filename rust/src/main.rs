@@ -7,10 +7,6 @@ use dht::Node;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// binding ip of the local machine
-    #[arg(long)]
-    bind_ip: String,
-
     /// binding port of the local machine
     #[arg(long)]
     bind_port: String,
@@ -19,7 +15,7 @@ struct Args {
     #[arg(long)]
     remote_ip: Option<String>,
 
-    /// Port of the remote node
+    /// Port of remote node
     #[arg(long)]
     remote_port: Option<String>,
 }
@@ -29,19 +25,21 @@ fn main() -> std::io::Result<()> {
     let args = Args::parse();
 
     // Building local address
-    let mut local_address = args.bind_ip.clone();
-    local_address.push_str(&format!(":{}", args.bind_port));
+    let addr: dht::Addr = dht::Addr {
+        ip: String::from("127.0.0.1"),
+        port: args.bind_port.parse().unwrap(),
+    };
 
     // Create remote address if both ip and port were provided, otherwise set to None
     let remote_address = match args.remote_ip.zip(args.remote_port) {
-        Some((mut ip, port)) => {
-            ip.push_str(&format!(":{port}"));
-            Some(ip)
-        }
+        Some((ip, port)) => Some(dht::Addr {
+            ip,
+            port: port.parse().unwrap(),
+        }),
         None => None,
     };
 
-    let node = Node::new(local_address);
+    let mut node = Node::new(addr);
     node.run(remote_address)?;
 
     Ok(())
