@@ -1,6 +1,6 @@
+use crossbeam_channel::{Receiver as Crossbeam_Receiver, TryRecvError};
 use std::net::UdpSocket;
-use std::sync::mpsc::{ Sender, Receiver };
-use crossbeam_channel::{ Receiver as Crossbeam_Receiver, TryRecvError };
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
 // Main function of the request listener
@@ -11,13 +11,12 @@ pub fn run(
     channel_producer: Sender<String>,
     channel_stop: Crossbeam_Receiver<()>,
 ) -> std::io::Result<()> {
-
     loop {
         match channel_stop.try_recv() {
-           Err(TryRecvError::Disconnected) => {
+            Err(TryRecvError::Disconnected) => {
                 println!("DISCONNECTED");
                 break;
-            },
+            }
             Ok(()) => {
                 println!("DISCONNECTED");
                 break;
@@ -32,11 +31,9 @@ pub fn run(
         buf.truncate(amt);
 
         //send message and source to receiver
-        let src:String = ["SRC:".to_string(), src.to_string()].join("");
-        let msg:String = ["MSG:".to_string(), String::from_utf8(buf).unwrap()].join("");
-        channel_producer
-            .send([src, msg].join(";"))
-            .unwrap();
+        let src: String = ["SRC:".to_string(), src.to_string()].join("");
+        let msg: String = ["MSG:".to_string(), String::from_utf8(buf).unwrap()].join("");
+        channel_producer.send([src, msg].join(";")).unwrap();
     }
     Ok(())
 }
