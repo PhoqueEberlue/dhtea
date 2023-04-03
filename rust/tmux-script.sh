@@ -3,7 +3,7 @@
 if [[ -f "/home/paulinma/tools/tmux/usr/bin/tmux" ]]; then 
 	TMUX=/home/paulinma/tools/tmux/usr/bin/tmux
 else
-	TMUX=$(whereis tmux)
+	TMUX=$(which tmux)
 fi
 
 # create main entry point, or at least the first
