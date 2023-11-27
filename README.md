@@ -1,6 +1,6 @@
 # dhtea
 
-Maxime Paulin, Andrew Mary Huet de Barochez
+Violette Paulin, Andrew Mary Huet de Barochez
 
 School project aiming to implement a DHT p2p network.
 
